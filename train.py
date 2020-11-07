@@ -1,0 +1,187 @@
+import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.tensorboard import SummaryWriter
+import numpy as np
+import random
+import os
+import argparse
+import yaml
+from tqdm import tqdm
+
+from models.ocr import Ocr
+from data_loader import get_dataloader
+from utils import prepare_dir, clean_ckpts, logger, AverageMeter
+
+
+class Trainer(object):
+    def __init__(self, config_file: str):
+        self.cfg = yaml.load(open(config_file), Loader=yaml.FullLoader)
+        self.teach_forcing_prob = self.cfg['trainer']['teach_forcing_prob']
+
+        # Set random seed
+        np.random.seed(self.cfg['trainer']['seed'])
+        random.seed(self.cfg['trainer']['seed'])
+        torch.manual_seed(self.cfg['trainer']['seed'])
+        torch.cuda.manual_seed_all(self.cfg['trainer']['seed'])
+
+        dist.init_process_group(backend='nccl', init_method='env://')
+        self.local_rank = torch.distributed.get_rank()
+
+        self.model = Ocr(self.cfg['arch'])
+        self.model = self.model.cuda(self.local_rank)
+
+        process_group = torch.distributed.new_group(list(range(torch.cuda.device_count())))
+        self.model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.model, process_group)
+
+        # broadcast_buffers==True if use sync bn
+        self.model = DDP(self.model,
+                         device_ids=[self.local_rank],
+                         output_device=self.local_rank,
+                         find_unused_parameters=True,
+                         broadcast_buffers=True)
+
+        self.criterion = torch.nn.NLLLoss()
+        self.criterion = self.criterion.cuda(self.local_rank)
+
+        self.optimizer = getattr(torch.optim, self.cfg['optimizer']['type'])(
+            self.model.parameters(), **self.cfg['optimizer']['args']
+        )
+
+        # Load model from previous checkpoint
+        self.step, self.epoch = 0, 0
+        self.ckpt_path = self.cfg['trainer']['outputs'] + 'checkpoints'
+        if self.cfg['trainer']['restore']:
+            ckpt = os.path.join(self.ckpt_path, sorted(os.listdir(self.ckpt_path))[-1])
+            ckpt = torch.load(ckpt)
+            self.model.module.load_state_dict(ckpt['encoder'], strict=True)
+            self.optimizer.load_state_dict(ckpt['optimizer'])
+            self.step = ckpt['step']
+            self.epoch = ckpt['epoch'] + 1
+            #self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
+            if self.local_rank == 0:
+                logger.info(f'Contatinue training from step {self.step} and epoch {self.epoch}.')
+        elif self.local_rank == 0:
+            prepare_dir(self.ckpt_path)
+            logger.info(f"{self.ckpt_path} was cleaned.")
+        
+        if self.local_rank == 0:
+            # Create tensorboard summary writer
+            summary_dir = self.cfg['trainer']['outputs'] + 'summary'
+            if not self.cfg['trainer']['restore']:
+                prepare_dir(summary_dir)
+                logger.info(f"{summary_dir} was cleaned.")
+            self.writer = SummaryWriter(summary_dir)
+
+            #add graph
+            if self.cfg['trainer']['tensorboard']:
+                self.writer.add_graph(self.model.module, torch.zeros(1, 3, 640, 640).cuda(self.local_rank))
+                torch.cuda.empty_cache()
+        
+        # Create Dataloader
+        self.train_data_loader, self.sampler = get_dataloader(self.cfg['dataset']['train'], distributed=True)
+        # Wether use validate or not
+        self.val_enable = 'val' in self.cfg['dataset']
+        if self.val_enable and self.local_rank == 0:
+            self.val_data_loader, _ = get_dataloader(self.cfg['dataset']['val'], distributed=False)
+        
+        if self.local_rank == 0:
+            with open(self.cfg['trainer']['outputs'] + 'debug_configs.yaml', 'w') as f:
+                yaml.dump(self.cfg, f, indent=1)
+            
+            self.train_loss = AverageMeter()
+
+    def train(self):
+        while self.epoch < self.cfg['trainer']['epochs']:
+            self._train_step()
+            if self.local_rank == 0 and self.val_enable:
+                self._val_step()
+            if self.local_rank == 0:
+                self._save_network()
+            self.epoch += 1
+
+    def _train_step(self):
+        if self.local_rank == 0:
+            logger.info('----------------------------------------------------------')
+            logger.info(f'Training for epoch {self.epoch} ...')
+        torch.backends.cudnn.benchmark = self.cfg['trainer']['use_benchmark']
+        self.sampler.set_epoch(self.epoch)
+        self.model.train()
+        for images, labels in self.train_data_loader:
+            self.step += 1
+            self.optimizer.zero_grad()
+            images = images.cuda(self.local_rank)
+            labels = labels.cuda(self.local_rank)
+
+            # 教师强制：将目标label作为下一个输入
+            teach_forcing = random.random() < self.teach_forcing_prob  # use teach forcing
+            preds = self.model(images, teach_forcing, labels)
+            loss = 0.
+            for pred, label in zip(preds, labels[1:, :]):
+                loss += self.criterion(pred, label)
+
+            # backpropagation
+            loss.backward()            
+            torch.nn.utils.clip_grad_norm_(self.model.module.parameters(), self.cfg['trainer']['clip_grad_norm'])
+            self.optimizer.step()
+
+            if self.local_rank == 0:
+                self.train_loss.update(loss.item())
+                if self.step % self.cfg['trainer']['log_iter'] == 0:
+                    logger.info(f'step: {self.step}, loss: {self.train_loss.avg:.6f}')
+
+                    if self.cfg['trainer']['tensorboard']:
+                        self.writer.add_scalar('Train/loss', self.train_loss.avg, self.step)
+                        self.writer.flush()
+
+                    self.train_loss.reset()
+        torch.cuda.empty_cache()
+    
+    def _val_step(self):
+        logger.info('**********************************************************')
+        logger.info(f'Validating for epoch {self.epoch} ...')
+        torch.backends.cudnn.benchmark = False  # Since image shape is different
+        self.model.eval()
+        val_loss = AverageMeter()
+        num_correct, num_wrong = 0, 0
+        with torch.no_grad():
+            for images_cpu, labels_cpu in tqdm(self.val_data_loader):
+                images = images_cpu.cuda(self.local_rank)
+                labels = labels_cpu.cuda(self.local_rank)
+                loss = 0.
+                pred_labels = []
+                # 预测的时候采用非强制策略，将前一次的输出，作为下一次的输入，直到标签为EOS_TOKEN时停止
+                preds = self.model(images, False, labels)
+                for pred, label in zip(preds, labels[1:]):
+                    loss += self.criterion(pred, label)
+                    pred_labels.append(pred.cpu().numpy())
+
+                val_loss.update(loss.item())
+                pred_labels = np.array(pred_labels)  # (length, N)
+                gt_labels = labels_cpu.numpy()[1:]
+                num_correct += np.sum(pred_labels == gt_labels)
+                num_wrong += np.sum(pred_labels != gt_labels)
+
+        torch.cuda.empty_cache()      
+        logger.info(f'epoch: {self.epoch}, loss: {val_loss.avg:.6f}, '
+                    f'accuracy: {num_correct / (num_correct + num_wrong):.4f}')
+
+    def _save_network(self):
+        state = {
+            'model': self.model.module.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'step': self.step,
+            'epoch': self.epoch
+        }
+        torch.save(state, self.ckpt_path + f'/model_epoch_{self.epoch}_step_{self.step}.pth')
+        clean_ckpts(self.ckpt_path, num_max=3)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Aocr')
+    parser.add_argument('-c', '--config_file', default='config.yaml', type=str)
+    parser.add_argument("--local_rank", type=int)
+    args = parser.parse_args()
+
+    trainer = Trainer(args.config_file)
+    trainer.train()

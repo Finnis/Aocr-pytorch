@@ -1,0 +1,3 @@
+datasets/train_imgs/*
+__pycache__/
+outputs/*
