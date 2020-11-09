@@ -14,13 +14,13 @@ from utils import logger, LabelConverter
 class Prediction(object):
     def __init__(self, args):
         config = yaml.load(open(args.config_file), Loader=yaml.FullLoader)
-        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.benchmark = args.use_benchmark
 
-        self.model = Ocr(config['arch'])
-        if os.path.isfile(config.model_path):
-            model_path = config.model_path
+        self.model = Ocr(config['arch'], 0)
+        if os.path.isfile(args.model_path):
+            model_path = args.model_path
         else:
-            model_path = os.path.join(config.model_path, sorted(os.listdir(config.model_path))[-1])
+            model_path = os.path.join(args.model_path, sorted(os.listdir(args.model_path))[-1])
         ckpt = torch.load(model_path, map_location=torch.device('cpu'))
         self.model.load_state_dict(ckpt['model'])
         logger.info(f'Model loaded from {model_path}')
@@ -28,8 +28,9 @@ class Prediction(object):
         self.model.eval()
 
         self.label2text = LabelConverter()
-        self.max_h, self.max_w = config['dataset']['train']['img_size']
-    
+        self.max_h = config['dataset']['train']['img_size']['max_h']
+        self.max_w = config['dataset']['train']['img_size']['max_w']
+        
     def predict(self, imgs_path):
         imgs_list = sorted(os.listdir(imgs_path))
         logger.info(f'Find {len(imgs_list)} images in {imgs_path}')
@@ -46,7 +47,7 @@ class Prediction(object):
         im = self._preprocess_img(im)
         im = im.cuda()
         pred_labels = self.model(im, False)
-        text = self.label2text(pred_labels)
+        text = self.label2text.decode(pred_labels)
 
         return text
 
@@ -68,12 +69,15 @@ class Prediction(object):
         im = im[np.newaxis, np.newaxis, ...]
         im = torch.from_numpy(im)
 
+        return im
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Ocr')
     parser.add_argument('-c', '--config_file', default='config.yaml')
     parser.add_argument('--model_path', default='./outputs/checkpoints', type=str)
-    parser.add_argument('--image_path', type=str)
+    parser.add_argument('--image_path', default='./datasets/train_imgs', type=str)
+    parser.add_argument('--use_benchmark', action='store_false')
     args = parser.parse_args()
 
     pred = Prediction(args)

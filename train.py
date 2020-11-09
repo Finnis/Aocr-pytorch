@@ -28,7 +28,7 @@ class Trainer(object):
         dist.init_process_group(backend='nccl', init_method='env://')
         self.local_rank = torch.distributed.get_rank()
 
-        self.model = Ocr(self.cfg['arch'])
+        self.model = Ocr(self.cfg['arch'], self.local_rank)
         self.model = self.model.cuda(self.local_rank)
 
         process_group = torch.distributed.new_group(list(range(torch.cuda.device_count())))
@@ -75,7 +75,7 @@ class Trainer(object):
 
             #add graph
             if self.cfg['trainer']['tensorboard']:
-                self.writer.add_graph(self.model.module, torch.zeros(1, 3, 640, 640).cuda(self.local_rank))
+                self.writer.add_graph(self.model.module, torch.zeros(1, 1, 32, 224).cuda(self.local_rank))
                 torch.cuda.empty_cache()
         
         # Create Dataloader

@@ -2,7 +2,7 @@
 
 import os
 
-images_dir = 'train_imgs'
+images_dir = 'images'
 
 image_list = []
 for fname in os.listdir(images_dir):

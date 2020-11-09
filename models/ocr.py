@@ -6,7 +6,7 @@ from .encoder import CNN
 
 
 class Ocr(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, local_rank):
         super().__init__()
         self.encoder = CNN(**config['encoder'])
         self.decoder = AttentionDecoder(**config['decoder'])
@@ -14,12 +14,12 @@ class Ocr(nn.Module):
         self.encoder.apply(self._weights_init)
         self.decoder.apply(self._weights_init)
         
-        self.local_rank = torch.distributed.get_rank()
-        self.max_length = config['max_length']
+        self.local_rank = local_rank
+        self.max_length = config['max_pred_length']
 
-    def forward(self, images, teach_forcing, labels=None):
+    def forward(self, images, teach_forcing=False, labels=None):
         bsize = images.size(0)
-        encoder_out = self.encoder(images)  # (57, 4, 256)
+        encoder_out = self.encoder(images)  # (56, 4, 256)
         
         decoder_hidden = self.decoder.init_hidden(bsize).cuda(self.local_rank)
         outputs = []

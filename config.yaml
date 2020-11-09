@@ -8,23 +8,23 @@ dataset:
       max_h: 32
       max_w: 224
     loader:
-      batch_size: 64
-      shuffle: true
+      batch_size: 128
+      shuffle: false  # Need to be false for using distributed sampler(defalut shuffle:true)
       pin_memory: true
       num_workers: 4
-  val:
-    type: LatinDataset
-    args:
-      list_file: ./datasets/train_list.txt
-      num_channels: 1
-    img_size:
-      max_h: 32
-      max_w: 224
-    loader:
-      batch_size: 64
-      shuffle: false
-      pin_memory: true
-      num_workers: 4
+  # val:
+  #   type: LatinDataset
+  #   args:
+  #     list_file: ./datasets/train_list.txt
+  #     num_channels: 1
+  #   img_size:
+  #     max_h: 32
+  #     max_w: 224
+  #   loader:
+  #     batch_size: 1
+  #     shuffle: false
+  #     pin_memory: true
+  #     num_workers: 4
 
 arch:
   encoder:
@@ -34,17 +34,17 @@ arch:
     num_hidden: 256
     output_size: 39  # 10 + 26 + 2 + 1  2: GO, EOS, 1: Blank
     dropout_rate: 0.5
-  max_length: 32
+  max_pred_length: 32
 
 trainer:
   teach_forcing_prob: 0.5
-  clip_grad_norm: 20
+  clip_grad_norm: 15
   seed: 2
   epochs: 1000
   log_iter: 20
   outputs: 'outputs/'
   restore: false
-  tensorboard: false
+  tensorboard: true
   use_benchmark: false
 
 optimizer:
