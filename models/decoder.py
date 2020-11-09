@@ -24,6 +24,8 @@ class AttentionDecoder(nn.Module):
         self.softmax = nn.Softmax(dim=2)
         self.log_softmax = nn.LogSoftmax(dim=1)
 
+        self.apply(self._weights_init)
+
     def forward(self, input, hidden, encoder_outputs):
         embedded = self.embedding(input)  # 前一次的输出进行词嵌入
         embedded = self.dropout(embedded)
@@ -48,4 +50,14 @@ class AttentionDecoder(nn.Module):
         result = torch.zeros(1, batch_size, self.num_hidden)
 
         return result
-    
+       
+    def _weights_init(self, model):
+        # Official init from torch repo.
+        for m in model.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.constant_(m.bias, 0)

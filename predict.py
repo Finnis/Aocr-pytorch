@@ -9,6 +9,8 @@ import argparse
 
 from models.ocr import Ocr
 from utils import logger, LabelConverter
+from models.decoder import AttentionDecoder
+from models.encoder import CNN
 
 
 class Prediction(object):
@@ -16,20 +18,25 @@ class Prediction(object):
         config = yaml.load(open(args.config_file), Loader=yaml.FullLoader)
         torch.backends.cudnn.benchmark = args.use_benchmark
 
-        self.model = Ocr(config['arch'], 0)
+        self.encoder = CNN(**config['arch']['encoder'])
+        self.decoder = AttentionDecoder(**config['arch']['decoder'])
+        self.num_hidden = self.decoder.num_hidden
+        
         if os.path.isfile(args.model_path):
             model_path = args.model_path
         else:
             model_path = os.path.join(args.model_path, sorted(os.listdir(args.model_path))[-1])
         ckpt = torch.load(model_path, map_location=torch.device('cpu'))
-        self.model.load_state_dict(ckpt['model'])
+        self.encoder.load_state_dict(ckpt['encoder'])
+        self.decoder.load_state_dict(ckpt['decoder'])
         logger.info(f'Model loaded from {model_path}')
-        self.model.cuda()
-        self.model.eval()
+        self.encoder = self.encoder.cuda()
+        self.decoder = self.decoder.cuda()
 
         self.label2text = LabelConverter()
         self.max_h = config['dataset']['train']['img_size']['max_h']
         self.max_w = config['dataset']['train']['img_size']['max_w']
+        self.max_length = args.max_pred_length
         
     def predict(self, imgs_path):
         imgs_list = sorted(os.listdir(imgs_path))
@@ -46,7 +53,21 @@ class Prediction(object):
         im = cv2.imread(img_path, 0).astype(np.float32)
         im = self._preprocess_img(im)
         im = im.cuda()
-        pred_labels = self.model(im, False)
+        encoder_out = self.encoder(im)  # (56, 4, 256)
+
+        pred_labels = []
+        decoder_in = torch.zeros(1).long().cuda()
+        decoder_hidden = torch.zeros(1, 1, self.num_hidden).cuda()
+        for _ in range(self.max_length):
+            decoder_out, decoder_hidden, decoder_attn = self.decoder(
+                decoder_in, decoder_hidden, encoder_out
+            )
+            decoder_in = torch.argmax(decoder_out, dim=1)
+            pred = decoder_in.squeeze()  # scalar tensor
+            pred_labels.append(pred)
+            if pred == 1:  # EOS
+                break
+ 
         text = self.label2text.decode(pred_labels)
 
         return text
@@ -76,8 +97,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Ocr')
     parser.add_argument('-c', '--config_file', default='config.yaml')
     parser.add_argument('--model_path', default='./outputs/checkpoints', type=str)
-    parser.add_argument('--image_path', default='./datasets/train_imgs', type=str)
+    parser.add_argument('--image_path', default='./datasets/images', type=str)
     parser.add_argument('--use_benchmark', action='store_false')
+    parser.add_argument('--max_pred_length', default=16, type=int)
     args = parser.parse_args()
 
     pred = Prediction(args)

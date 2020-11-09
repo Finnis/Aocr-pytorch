@@ -58,6 +58,8 @@ class CNN(nn.Module):
         )
         self.dropout = nn.Dropout(drop_rate, inplace=True)
 
+        self.apply(self._weights_init)
+
     def forward(self, x):
         x = self.cnn(x)
         #x = self.dropout(x)  # TODO do dropout in channels
@@ -68,3 +70,14 @@ class CNN(nn.Module):
         x = self.rnn(x)  # seq * batch * n_classes// 25 × batchsize × 256（隐藏节点个数）
         
         return x
+    
+    def _weights_init(self, model):
+        # Official init from torch repo.
+        for m in model.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.constant_(m.bias, 0)
