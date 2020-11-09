@@ -26,7 +26,7 @@ class CNN(nn.Module):
         CNN+BiLstm做特征提取
     '''
     def __init__(self, in_channels, num_hidden, drop_rate=0.5):
-        super().__init__()
+        super(CNN, self).__init__()
         self.cnn = nn.Sequential(
             nn.Conv2d(in_channels, 64, 3, 1, 1),  # (N, 64, 32, 224)
             nn.ReLU(True),
@@ -46,11 +46,10 @@ class CNN(nn.Module):
             nn.Conv2d(512, 512, 3, 1, 1),
             nn.ReLU(True),
             nn.MaxPool2d((2, 1), (2, 1), (0, 0)), # (N, 512, 2, 56)
-            nn.ZeroPad2d((0, 1, 1, 1)),  #(left, right, up, down)
-            nn.Conv2d(512, 512, 2, 1, 0),
+            nn.ZeroPad2d((0, 1, 0, 0)),  #(left, right, up, down)
+            nn.Conv2d(512, 512, 2, 1, 0), #(N, 512, 1, 56)
             nn.BatchNorm2d(512),
             nn.ReLU(True),
-            nn.MaxPool2d((3, 1), (1, 1), (0, 0)),  #(N, 512, 1, 56)
         )
         self.rnn = nn.Sequential(
             BidirectionalLSTM(512, num_hidden, num_hidden),

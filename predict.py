@@ -1,5 +1,6 @@
 #! /usr/bin/env python
 import os
+from numpy.core.numeric import indices
 import torch
 import yaml
 import cv2
@@ -7,7 +8,6 @@ from tqdm import tqdm
 import numpy as np
 import argparse
 
-from models.ocr import Ocr
 from utils import logger, LabelConverter
 from models.decoder import AttentionDecoder
 from models.encoder import CNN
@@ -42,9 +42,10 @@ class Prediction(object):
         imgs_list = sorted(os.listdir(imgs_path))
         logger.info(f'Find {len(imgs_list)} images in {imgs_path}')
         results = []
-        for name in tqdm(imgs_list):
-            text = self._predict(os.path.join(imgs_path, name))
-            out = name + ' ' + ''.join(text) + '\n'
+        for name in tqdm(imgs_list[:10]):
+            text, probs = self._predict(os.path.join(imgs_path, name))
+            out = name + ' ' + ''.join(text) + '  ' + f'[{round(np.prod(probs), 4)}] ' \
+                + ','.join(map(str, probs)) + '\n'
             results.append(out)
         with open('results.txt', 'w') as f:
             f.writelines(results)
@@ -56,21 +57,26 @@ class Prediction(object):
         encoder_out = self.encoder(im)  # (56, 4, 256)
 
         pred_labels = []
+        probs = []
         decoder_in = torch.zeros(1).long().cuda()
         decoder_hidden = torch.zeros(1, 1, self.num_hidden).cuda()
         for _ in range(self.max_length):
-            decoder_out, decoder_hidden, decoder_attn = self.decoder(
-                decoder_in, decoder_hidden, encoder_out
-            )
-            decoder_in = torch.argmax(decoder_out, dim=1)
-            pred = decoder_in.squeeze()  # scalar tensor
-            pred_labels.append(pred)
+            with torch.no_grad():
+                decoder_out, decoder_hidden, decoder_attn = self.decoder(
+                    decoder_in, decoder_hidden, encoder_out
+                )
+            values, indexes = torch.topk(decoder_out, k=1, dim=1)
+            decoder_in = indexes[0]
+            pred = indexes[0].item()  # scalar number
+            prob = torch.exp(values[0]).item()
             if pred == 1:  # EOS
                 break
+            pred_labels.append(pred)
+            probs.append(round(prob, 4))
  
         text = self.label2text.decode(pred_labels)
 
-        return text
+        return text, probs
 
     def _preprocess_img(self, im):
         im = im / 127.5 - 1.

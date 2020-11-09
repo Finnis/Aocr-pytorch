@@ -146,7 +146,7 @@ class Trainer(object):
             if self.local_rank == 0:
                 self.train_loss.update(loss.item())
                 if self.step % self.cfg['trainer']['log_iter'] == 0:
-                    logger.info(f'step: {self.step}, loss: {self.train_loss.avg:.6f}')
+                    logger.info(f'step: {self.step}, loss: {self.train_loss.avg:.7f}')
 
                     if self.cfg['trainer']['tensorboard']:
                         self.writer.add_scalar('Train/loss', self.train_loss.avg, self.step)

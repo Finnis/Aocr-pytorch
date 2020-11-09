@@ -39,16 +39,15 @@ trainer:
   teach_forcing_prob: 0.5
   clip_grad_norm: 15
   seed: 2
-  epochs: 1000
+  epochs: 1500
   log_iter: 20
   outputs: 'outputs/'
-  restore: false
+  restore: true
   tensorboard: true
-  use_benchmark: false
+  use_benchmark: true
 
 optimizer:
   type: Adadelta
   args:
     lr: 1.
     weight_decay: 0.00001
-
