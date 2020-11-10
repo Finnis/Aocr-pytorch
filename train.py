@@ -125,6 +125,7 @@ class Trainer(object):
         self.encoder.train()
         self.decoder.train()
         for images, labels in self.train_data_loader:
+
             self.step += 1
             self.optimizer.zero_grad()
             images = images.cuda(self.local_rank)
@@ -193,7 +194,7 @@ class Trainer(object):
         outputs = []
         if teach_forcing:
             for decoder_in in labels[:-1]:  # decoder_in (N,)
-                decoder_out, decoder_hidden, decoder_attn = self.decoder(
+                decoder_out, decoder_hidden, _ = self.decoder(
                     decoder_in, decoder_hidden, encoder_out
                 )
                 outputs.append(decoder_out)  # (N, 39)

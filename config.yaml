@@ -11,7 +11,7 @@ dataset:
       batch_size: 128
       shuffle: false  # Need to be false for using distributed sampler(defalut shuffle:true)
       pin_memory: true
-      num_workers: 4
+      num_workers: 8
   # val:
   #   type: LatinDataset
   #   args:
@@ -39,10 +39,10 @@ trainer:
   teach_forcing_prob: 0.5
   clip_grad_norm: 15
   seed: 2
-  epochs: 1500
+  epochs: 1000
   log_iter: 20
   outputs: 'outputs/'
-  restore: true
+  restore: false
   tensorboard: true
   use_benchmark: true
 

@@ -1,9 +1,7 @@
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
 from . import dataset
-
 
 def get_dataloader(config: dict, distributed=False):
     _dataset = getattr(dataset, config['type'])(**config['args'])
@@ -20,10 +18,8 @@ def get_dataloader(config: dict, distributed=False):
 
 
 if __name__ == "__main__":
-    cfg = {}
-    cfg['type'] = 'LatinDataset'
-    cfg['args'] = {'list_file': '../datasets/train_list.txt'}
-    cfg['loader'] = {'batch_size': 4, 'pin_memory': False}
+    import yaml
+    cfg = yaml.load(open('config.yaml'), Loader=yaml.FullLoader)
 
     load, _ = get_dataloader(cfg)
     for data in load:

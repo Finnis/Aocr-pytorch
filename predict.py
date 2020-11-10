@@ -42,11 +42,16 @@ class Prediction(object):
         imgs_list = sorted(os.listdir(imgs_path))
         logger.info(f'Find {len(imgs_list)} images in {imgs_path}')
         results = []
-        for name in tqdm(imgs_list[:10]):
+        num = 0
+        for name in tqdm(imgs_list):
             text, probs = self._predict(os.path.join(imgs_path, name))
             out = name + ' ' + ''.join(text) + '  ' + f'[{round(np.prod(probs), 4)}] ' \
                 + ','.join(map(str, probs)) + '\n'
             results.append(out)
+            label = name.split('_')[1].replace('.jpg', '')
+            if label == ''.join(text):
+                num += 1
+        logger.info(f'Accuracy: {num / len(imgs_list)}')
         with open('results.txt', 'w') as f:
             f.writelines(results)
     

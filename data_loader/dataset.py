@@ -5,10 +5,11 @@ import numpy as np
 import torch
 
 from utils import LabelConverter, logger
+from . import augs
 
 
 class LatinDataset(Dataset):
-    def __init__(self, list_file, num_channels=1, transform=None):
+    def __init__(self, list_file, num_channels=1, data_aug=[]):
         self.image_list, self.label_list = [], []
         data_root = os.path.dirname(list_file)
         with open(list_file) as f:
@@ -18,7 +19,8 @@ class LatinDataset(Dataset):
             self.image_list.append(os.path.join(data_root, img))
             self.label_list.append(label)
 
-        self.transform = transform
+        self.augs = [augs.elastic_transform, augs.shift_transform_cpp]
+
         if num_channels == 1:
             self.flag = 0
         elif num_channels == 3:
@@ -33,14 +35,14 @@ class LatinDataset(Dataset):
 
     def __getitem__(self, index):
         img = cv2.imread(self.image_list[index], self.flag).astype(np.float32)
-        img = img / 127.5 - 1.
         if not self.flag:
             img = img[..., np.newaxis]
         label = self.label_list[index]
 
-        if self.transform is not None:
-            img = self.transform(img)
+        for aug in self.augs:
+            img = aug(img)
 
+        img = img / 127.5 - 1.
         return img, label
 
 
