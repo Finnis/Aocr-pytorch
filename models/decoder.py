@@ -7,7 +7,7 @@ class AttentionDecoder(nn.Module):
     """
         采用seq to seq模型，修改注意力权重的计算方式
     """
-    def __init__(self, num_hidden, output_size, dropout_rate=0.1):
+    def __init__(self, num_hidden, output_size, dropout_rate=0.5):
         super().__init__()
         self.num_hidden = num_hidden
         self.output_size = output_size
@@ -20,7 +20,6 @@ class AttentionDecoder(nn.Module):
 
         self.vat = nn.Linear(num_hidden, 1)
 
-        self.softmax = nn.Softmax(dim=0)
         self.log_softmax = nn.LogSoftmax(dim=1)
         self.relu = nn.ReLU(True)
 
@@ -30,16 +29,19 @@ class AttentionDecoder(nn.Module):
         embedded = self.embedding(x)  # (N, num_hidden)
         embedded = self.dropout(embedded)
 
-        alpha = hidden + encoder_outputs  # (w, N, num_hidden)
-        attn_weights = self.vat(torch.tanh(alpha))  #(w, N, 1)
+        alpha = hidden * encoder_outputs  # (w, N, num_hidden)
+        attn_weights = self.vat(alpha)  #(w, N, 1)
 
-        attn_weights = self.softmax(attn_weights)
+        # alpha = hidden + encoder_outputs  # (w, N, num_hidden)
+        # attn_weights = self.vat(torch.tanh(alpha))  #(w, N, 1)
+
+        attn_weights = F.softmax(attn_weights, dim=0)
         attn_weights = attn_weights.permute([1, 2, 0])  # (N, 1, w)
         encoder_outputs = encoder_outputs.permute([1, 0, 2])  # (N, w, num_hidden) 
         attn_applied = torch.matmul(attn_weights, encoder_outputs)  # (N, 1, num_hidden)
         output = torch.cat([embedded, attn_applied.squeeze(1)], 1)  # (N, num_hidden*2)
         output = self.attn_combine(output).unsqueeze(0)  # (1, N, num_hidden)
-        output = self.relu(output)
+        #output = self.relu(output)
         output, hidden = self.gru(output, hidden)  # (1, N, num_hidden)
         output = self.log_softmax(self.out(output.squeeze(0)))  # 最后输出一个概率
         

@@ -30,6 +30,7 @@ arch:
   encoder:
     in_channels: 1
     num_hidden: 256
+    dropout_rate: 0.5
   decoder:
     num_hidden: 256
     output_size: 39  # 10 + 26 + 2 + 1  2: GO, EOS, 1: Blank

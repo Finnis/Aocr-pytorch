@@ -5,7 +5,7 @@ class CNN(nn.Module):
     '''
         CNN+BiLstm做特征提取
     '''
-    def __init__(self, in_channels, num_hidden):
+    def __init__(self, in_channels, num_hidden, dropout_rate=0.5):
         super(CNN, self).__init__()
         self.cnn = nn.Sequential(
             nn.Conv2d(in_channels, 64, 3, 1, 1, bias=False),  # (N, 64, 32, 224)
@@ -31,13 +31,10 @@ class CNN(nn.Module):
             nn.BatchNorm2d(512),
             nn.ReLU(True),
         )
-        # self.rnn = nn.Sequential(
-        #     BiLSTM(512, num_hidden, num_hidden),
-        #     BiLSTM(num_hidden, num_hidden, num_hidden)
-        # )
 
         self.bi_lstm = nn.LSTM(512, num_hidden, bidirectional=True, num_layers=2)
         self.embedding = nn.Linear(num_hidden * 2, num_hidden)
+        self.dropout = nn.Dropout(dropout_rate, inplace=True)
 
         self.apply(self._weights_init)
 
@@ -48,6 +45,7 @@ class CNN(nn.Module):
         # rnn features calculate
         x, _ = self.bi_lstm(x)  # (w, N, num_hidden*2)
         x = self.embedding(x)  # (w, N, num_hidden)
+        x = self.dropout(x)
 
         return x
     
